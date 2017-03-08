@@ -1,5 +1,5 @@
 # picolisp-acdc
-## Arithmetic Coding: Basic adaptive model implementation
+## Arithmetic Coding: coder + simple adaptive model
 
 Implementation is based on the algorithm and code described in
 
