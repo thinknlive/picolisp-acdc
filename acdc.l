@@ -1,12 +1,14 @@
 # -----------------
 (de *ACDC_Debug . NIL)
 
+(setq *ACDC_Buffer NIL)
+
 # -----------------
 (class +ACDC_Scale)
 # bits top qtr1 half qtr2
 
 (dm T (B)
-   (default B 1024)
+   (default B 58)
    (=: bits B)
    (=: top (- (** 2 B) 1))
    (=: qtr1 (+ 1 (/ (: top) 4)))
@@ -25,63 +27,84 @@
    (=: high (; (: scale) top))
    (=: top (: high))
    (=: followBits 0)
-   (=: buffer NIL) )
-
+   (=: buffer NIL)
+)
             
 (dm outputBit> (Bit)
-   (=: buffer (cons Bit (: buffer)))
+   # (=: buffer (cons Bit (: buffer)))
+   (link Bit)
    (while (gt0 (: followBits))
-      (=: buffer (cons (x| 1 Bit) (: buffer)))
-      (=: followBits (- (: followBits) 1)) ) )
+      # (=: buffer (cons (x| 1 Bit) (: buffer)))
+      (link (x| 1 Bit))
+      (=: followBits (- (: followBits) 1)) )
+)
 
 (dm encode> (L H Total)
-   (if (or (> H (: top)) 
-      (>= L H) 
-      (> Total (: top)))
-         (throw (text "Encoder/encode: data error; Low,High,Total: @1,@2,@3 Top: @4" L H Total (: top))) )
-   
-
-   (let (Range (+ (- (: high) (: low)) 1)
-      Half (; (: scale) half)
+   (let 
+      (Half (; (: scale) half)
       Qtr1 (; (: scale) qtr1)
-      Qtr3 (; (: scale) qtr3) ) 
+      Qtr3 (; (: scale) qtr3)
+      Top (: top)
+      High (: high)
+      Low (: low)
+      Range (+ (- High Low) 1) )
       
-      (=: high (+ (: low) (- (/ (* Range H) Total) 1)))
-      (=: low  (+ (: low) (/ (* Range L) Total)))
+      (if (or (> H Top) 
+         (>= L H) 
+         (> Total Top))
+            (throw (text "Encoder/encode: data error; Low,High,Total: @1,@2,@3 Top: @4" L H Total (: top))) )
+      
+      (setq
+         High (+ Low (- (/ (* Range H) Total) 1))
+         Low  (+ Low (/ (* Range L) Total)) )
 
-      (if (> (: high) (: top)) 
+      (if (> High Top) 
          (throw "Encoder/encode: high > top") )
-      (if (>= (: low)  (: high)) 
+      (if (>= Low High) 
          (throw "Encoder/encode: low >= high") )
+
+      (and *ACDC_Debug (msg (text "Encoder/encode L,H,Total: @1,@2,@3 Low,High: @3,@4" L H Total Low High)))
 
       (loop
          (NIL
             (cond
-               ((< (: high) Half)
+               ((< High Half)
                   (outputBit> This 0) 
                   T )
-               ((>= (: low) Half)
+               ((>= Low Half)
                   (outputBit> This 1)
-                  (=: low  (- (: low) Half))
-                  (=: high (- (: high) Half))
+                  (dec 'Low Half)
+                  (dec 'High Half)
                   T )
-               ((and (>= (: low) Qtr1) (< (: high) Qtr3))
+               ((and (>= Low Qtr1) (< High Qtr3))
                   (=: followBits (+ 1 (: followBits)))
-                  (=: low (- (: low) Qtr1))
-                  (=: high (- (: high) Qtr1))
+                  (dec 'Low Qtr1)
+                  (dec 'High Qtr1)
                   T )
                (T NIL) ) )
          
-         (=: low (* 2 (: low)))
-         (=: high (+ 1 (* 2 (: high)))) ) ) )
+         (setq 
+            Low (>> -1 Low)
+            High (+ 1 (>> -1 High)) ) )
+
+      (=: low Low)
+      (=: high High)
+
+) )
 
 
 (dm finalize> ()
-   (=: followBits (+ 1 (: followBits)))
-   (if (< (: low) (; (: scale) half))
-      (outputBit> This 1)
-      (outputBit> This 0) )
-   (: buffer) )
+   (let 
+      (Low (: low)
+       Half (; (: scale) half) )
+
+      (=: followBits (+ 1 (: followBits)))
+      (if (< Low Half)
+         (outputBit> This 1)
+         (outputBit> This 0) ) )
+
+      #(: buffer)
+)
 
 # -------------------        
 (class +ACDC_Decoder)
@@ -103,14 +126,19 @@
    (: eof) )
    
 (dm decodeTarget> (Total)
-   (let (
-      N (- (* Total (+ (- (: value) (: low)) 1)) 1)
-      D (+ (- (: high) (: low)) 1) )
+   (let 
+      (Value (: value)
+      High (: high)
+      Low (: low)
+      N (- (* Total (+ (- Value Low) 1)) 1)
+      D (+ (- High Low) 1) )
       (/ N D) ) )
 
 (dm getNextBit> ()
-   (=: value (+ (: value) (or (car (: buffer)) 0)))
-   (=: buffer (cdr (: buffer)) )
+   (let (Buffer (: buffer)
+      Bit (or (car Buffer) 0) )
+      (=: buffer (cdr Buffer))
+      Bit)
 )
    
 (dm startDecode> ()
@@ -118,44 +146,53 @@
    (=: value 0)
    (let (Bits (; (: scale) bits)) 
       (do Bits
-         (=: value (>> -1 (: value))) 
-         (getNextBit> This) ) )
+         (=: value (+ (>> -1 (: value)) (getNextBit> This))) ) ) 
 )
 
 (dm decode> (L H Total)
-   (let (Range (+ (- (: high) (: low)) 1) 
+   (let ( 
+      Top (: top) 
       Half (; (: scale) half)
       Qtr1 (; (: scale) qtr1)
-      Qtr3 (; (: scale) qtr3) ) 
+      Qtr3 (; (: scale) qtr3) 
+      Low (: low)
+      High (: high)
+      Value (: value)
+      Range (+ (- High Low) 1) ) 
       
-      (=: high (+ (: low) (- (/ (* Range H) Total) 1)))
-      (=: low  (+ (: low) (/ (* Range L) Total)) )
+      (setq High (+ Low (- (/ (* Range H) Total) 1))
+            Low  (+ Low (/ (* Range L) Total)) )
          
       (loop
          (NIL
             (cond
-               ((< (: high) Half) T)
-               ((>= (: low) Half)
-                  (=: value (- (: value) Half))
-                  (=: low (- (: low) Half))
-                  (=: high (- (: high) Half))
+               ((< High Half) T)
+               ((>= Low Half)
+                  (dec 'Value Half)
+                  (dec 'Low Half)
+                  (dec 'High Half)
                   T )
-               ((and (>= (: low) Qtr1) (< (: high) Qtr3))
-                  (=: value (- (: value) Qtr1))
-                  (=: low (- (: low) Qtr1))
-                  (=: high (- (: high) Qtr1))
+               ((and (>= Low Qtr1) (< High Qtr3))
+                  (dec 'Value Qtr1)
+                  (dec 'Low Qtr1)
+                  (dec 'High Qtr1)
                   T )
                (T NIL) ) )
             
             
-         (=: low (* 2 (: low)))
-         (=: high (+ 1 (* 2 (: high))))
+         (setq
+            Low (>> -1 Low)
+            High (+ 1 (>> -1 High)) 
+            Value (+ (>> -1 Value) (getNextBit> This)) )
 
-         (=: value (* 2 (: value)))
-         (getNextBit> This) 
-               
-         (if (or (< (: value) 0) (> (: value) (: top)))
-            (throw (text "Decoder error: bad value: @1" (: value)) ) ) ) ) )  
+         (if (or (< Value 0) (> Value Top))
+            (throw (text "Decoder error: bad value: @1" Value)) ) )
+
+      (=: low Low)
+      (=: high High)
+      (=: value Value)
+
+) )   
 
    
 # ----------------------------------------
@@ -172,7 +209,9 @@
    (=: eofSym (+ (: max) -1))       # eof symbol
    (=: topValue (; (; (: coder) scale) top))
    (let (Tmp NIL)                   # use idx tree for model probabilities
-      (for X (: max) (idx 'Tmp (list (dec X) 1) T))
+      (for X (: max) 
+         (idx 'Tmp (list (dec X) 1) T)
+         (inc 'Cum) )
       (balance 'Tmp Tmp)
       (=: counts Tmp) )
 )
@@ -184,22 +223,29 @@
 
 # Update the model for a symbols occurrence  
 (dm update> (Sym) 
-   (let (  
-      Tmp (lup (: counts) Sym) )          # Lookup the symbol
-      (if (not Tmp) (throw (text "Model/update: bad Sym; @1" Sym))) 
+   (let 
+      (Counts (: counts)  
+      Tmp (lup Counts Sym))   # Lookup the symbol
+      
+      (if (not Tmp) 
+         (throw (text "Model/update: bad Sym; @1" Sym)))
+ 
       (set (cdr Tmp) (+ 1 (cadr Tmp)))    # Destructively modify
+
       (=: total (+ 1 (: total)))          # Update total probability
+
       (if (>= (: total) (: topValue))
          (rescale> This) ) ) )
 
 (dm computeLower> (Sym)
-   (let (Sum 0 Cnt 0)
+   (let (Counts (: counts) Sum 0 Cnt 0)
       (while (< Cnt Sym)
          (setq Sum 
             (+ Sum  
-              (cadr (lup (: counts) Cnt)))
-            Cnt (+ 1 Cnt) ) ) 
-      Sum ) )
+              (cadr (lup Counts Cnt)) ) )
+         (inc 'Cnt) )  
+      Sum ) 
+)
 
 # Encode the given symbol
 (dm emit> (Sym) 
@@ -217,9 +263,10 @@
 (dm decode> ()
    (let (
       Target (decodeTarget> (: coder) (: total))
+      Counts (: counts)
       Sym 0
       Low 0      
-      High (cadr (lup (: counts) Sym)) )
+      High (cadr (lup Counts Sym)) )
 
       (if (> Target (: total))
          (throw (msg (text "!! Model/decode: bad Target; @1" Target))) )
@@ -227,12 +274,12 @@
       (while (>= Target High)
          (setq 
             Sym (+ 1 Sym)
-            High (+ High (cadr (lup (: counts) Sym))) ) ) 
+            High (+ High (cadr (lup Counts Sym))) ) ) 
          
       (if (= Sym (: eofSym))
          (eof> (: coder) T) )
       
-      (setq Low (- High (cadr (lup (: counts) Sym))))   
+      (setq Low (- High (cadr (lup Counts Sym))))   
       
       (decode> (: coder) Low High (: total))
 
@@ -247,17 +294,23 @@
 # Arithmetic Coding Compress
 
 (de ACDC_Compress (Msg)
-   (let (
+   (let 
+      (Buffer NIL
       Encoder (new '(+ACDC_Encoder))
       Model (new '(+ACDC_BasicModel) Encoder) )
-      
-      (mapc '((C) 
-         (emit> Model C) 
-         (update> Model C))  Msg )
+    
+      (setq Buffer
+         (make 
+            (prog 
+               (mapc '((C) 
+               (emit> Model C) 
+               (update> Model C))  Msg )
          
-      (emitEof> Model)
-
-      (reverse (finalize> Encoder)) ) )
+               (emitEof> Model)
+               (finalize> Encoder) ) ) )
+ 
+      Buffer )
+)
 
 # ---------------------------------------------------------
 # Arithmetic Coding Decompress
@@ -265,16 +318,21 @@
 (de ACDC_Decompress (Buffer)
    (let (Decoder (new '(+ACDC_Decoder) Buffer)
       Model (new '(+ACDC_BasicModel) Decoder) 
-      Msg NIL)
-     
-      (startDecode> Decoder) 
-      (loop
-         (setq C (decode> Model))
-         (T (eof> Decoder))
-         (update> Model C)
-         (setq Msg (cons C Msg)) )
-         
-      Msg) )
+      Msg NIL 
+      C NIL)
+
+      (setq Msg
+         (make
+            (prog
+               (startDecode> Decoder) 
+               (loop
+                  (setq C (decode> Model))
+                  (T (eof> Decoder))
+                  (update> Model C)
+                  (link C)) ) ) )
+
+      Msg)
+)
 
 # ---------------------------------------------------------
 NIL
