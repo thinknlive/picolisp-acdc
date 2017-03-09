@@ -6,7 +6,7 @@
 # bits top qtr1 half qtr2
 
 (dm T (B)
-   (default B 58)
+   (default B 1024)
    (=: bits B)
    (=: top (- (** 2 B) 1))
    (=: qtr1 (+ 1 (/ (: top) 4)))
@@ -301,6 +301,14 @@ NIL
 -> 65536
 : (/ (length (ACDC_Compress Msg)) 8)
 -> 303
+: (= Msg (reverse (ACDC_Decompress (ACDC_Compress Msg))))
+-> T
+
+# Compress 64K of random A-Z
+: (prog (setq Msg (make (do (** 2 16) (link (rand (char "A") (char "Z")))))) (length Msg))
+-> 65536
+: (/ (length (ACDC_Compress Msg)) 8)
+-> 38786
 : (= Msg (reverse (ACDC_Decompress (ACDC_Compress Msg))))
 -> T
 
