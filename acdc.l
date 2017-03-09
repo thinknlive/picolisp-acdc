@@ -8,7 +8,7 @@
 # bits top qtr1 half qtr2
 
 (dm T (B)
-   (default B 58)
+   (default B 32)
    (=: bits B)
    (=: top (- (** 2 B) 1))
    (=: qtr1 (+ 1 (/ (: top) 4)))
@@ -208,12 +208,12 @@
    (=: total (: max))               # total probability
    (=: eofSym (+ (: max) -1))       # eof symbol
    (=: topValue (; (; (: coder) scale) top))
-   (let (Tmp NIL)                   # use idx tree for model probabilities
-      (for X (: max) 
-         (idx 'Tmp (list (dec X) 1) T)
-         (inc 'Cum) )
-      (balance 'Tmp Tmp)
-      (=: counts Tmp) )
+
+   # Use idx tree for model probabilities
+   (balance
+      (:: counts)
+      (make (for X (: max) (link (list (dec X) 1)))) )
+
 )
 
 (dm rescale> ()
@@ -240,9 +240,8 @@
 (dm computeLower> (Sym)
    (let (Counts (: counts) Sum 0 Cnt 0)
       (while (< Cnt Sym)
-         (setq Sum 
-            (+ Sum  
-              (cadr (lup Counts Cnt)) ) )
+         (inc 'Sum 
+              (cadr (lup Counts Cnt)) )
          (inc 'Cnt) )  
       Sum ) 
 )
@@ -272,8 +271,8 @@
          (throw (msg (text "!! Model/decode: bad Target; @1" Target))) )
 
       (while (>= Target High)
+         (inc 'Sym)
          (setq 
-            Sym (+ 1 Sym)
             High (+ High (cadr (lup Counts Sym))) ) ) 
          
       (if (= Sym (: eofSym))
