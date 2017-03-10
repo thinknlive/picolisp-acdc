@@ -13,7 +13,7 @@ Both papers can be found online
 
 </hr>
 
-It is not fast by any measure... but it works.
+It works. The simple data model is not blazing fast; spends most of its time iterating over the symbol list.
 
 ~~~~
 : (load "acdc.l")
@@ -29,7 +29,7 @@ It is not fast by any measure... but it works.
 : (length Msg)
 -> 37
 
-: (pack (reverse (mapcar char (ACDC_Decompress (ACDC_Compress Msg)))))
+: (pack (mapcar char (ACDC_Decompress (ACDC_Compress Msg))))
 -> "she sells sea shells by the sea shore"
 
 # Compress 64K of 'A's
@@ -37,6 +37,6 @@ It is not fast by any measure... but it works.
 -> 65536
 : (/ (length (ACDC_Compress Msg)) 8)
 -> 303
-: (= Msg (reverse (ACDC_Decompress (ACDC_Compress Msg))))
+: (= Msg (ACDC_Decompress (ACDC_Compress Msg)))
 -> T
 ~~~~
