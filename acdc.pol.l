@@ -6,7 +6,7 @@
 # bits top qtr1 half qtr2
 
 (dm T (B)
-   (default B 32)
+   (default B 28)
    (=: bits B)
    (=: top (- (** 2 B) 1))
    (=: qtr1 (+ 1 (/ (: top) 4)))
@@ -26,6 +26,7 @@
    (=: top (: high))
    (=: followBits 0)
    (=: buffer NIL)
+   (=: cnt 0)
 )
             
 (dm outputBit> (Bit)
@@ -46,23 +47,23 @@
       High (: high)
       Low (: low)
       Range (+ (- High Low) 1) )
-      
+     
+      (inc (:: cnt)) 
+
       (if (or (> H Top) 
-         (>= L H) 
+         (> L H) 
          (> Total Top))
-            (throw (text "Encoder/encode: data error; Low,High,Total: @1,@2,@3 Top: @4" L H Total (: top))) )
-      
+            (throw (text "Encoder/encode: data error; Cnt,Low,High,Total: @1,@2,@3,@4 Top: @5" (: cnt) L H Total (: top))) )
+     
       (setq
          High (+ Low (- (/ (* Range H) Total) 1))
-         Low  (+ Low (/ (* Range L) Total)) )
+         Low  (+ Low (+ (/ (* Range L) Total) 0)) )
 
       (if (> High Top) 
-         (throw "Encoder/encode: high > top") )
+         (throw (text "Encoder/encode: high > top; @1 > @2" High Top) ) )
 
-      (if (>= Low High) 
-         (throw "Encoder/encode: low >= high") )
-
-      (and *ACDC_Debug (msg (text "Encoder/encode L,H,Total: @1,@2,@3 Low,High: @3,@4" L H Total Low High)))
+      (if (> Low High) 
+         (throw (text "Encoder/encode: low > high; @1 > @2; Cnt,L,H,Total: @3,@4,@5,@6" Low High (: cnt) L H Total)  ) )
 
       (loop
          (NIL
@@ -160,7 +161,7 @@
       Range (+ (- High Low) 1) ) 
       
       (setq High (+ Low (- (/ (* Range H) Total) 1))
-            Low  (+ Low (/ (* Range L) Total)) )
+            Low  (+ Low (+ (/ (* Range L) Total) 0)) )
          
       (loop
          (NIL
@@ -203,28 +204,40 @@
    (if (not Coder) 
       (throw "Arithmetic encoder required"))
    (=: coder Coder)                 # encoder|decoder instance
-   (=: max 257)                     # number of symbols (0..255 + 1 eof)
-   (=: total (: max))               # total probability
-   (=: eofSym (+ (: max) -1))       # eof symbol
+   (=: max 258)                     # number of symbols (0..255 + 1 eof)
+   (=: eofSym (+ (: max) -2))       # eof symbol
+   (=: eotSym (+ (: max) -1))       # eof symbol
    (=: topValue (; (; (: coder) scale) top))
 
-   # Use simple list for model probabilities
-   (=: counts (make (for X (: max) (link 1))))
+   # Maintain cumulative frequencies in list
+   (=: counts (make (for X (: max) (link (list X (- X 1))))))
+   (=: total (caar (nth (: counts) (inc (: eotSym)))))    # total probability
+   #(show This)
 )
 
 (dm rescale> ()
    # TODO: Rescale model; not necessary unless
    # very huge message or very low precision
-   (throw "BasicModel/rescale: Insufficient precision") )
+   #(throw "BasicModel/rescale: Insufficient precision") 
+   (mapc '((V) (set V (>> 1 (+ (car V) 1)))) (: counts))
+   # Ugly
+   (=: total (+ (caar (: counts)) 
+               (sum + (maplist 
+                  '((L) (- (or (caadr L) (caar L)) (caar L))) (: counts)))))
+
+)
 
 # Update the model for a symbols occurrence  
 (dm update> (Sym)
-   (if (> Sym (: eofSym))
-      (throw (text "Model/update: bad Sym: @1 >eofSym: @2" Sym (: eofSym))))
+   (if (> Sym (: eotSym))
+      (throw (text "Model/update: bad Sym: @1 >eotSym: @2" Sym (: eotSym))))
    
-   (inc (nth (: counts) (inc Sym)))
+   (let (R (nth (: counts) (inc Sym)))
+      (mapc '((V) (inc V)) R)
+   )
+
    (inc (:: total))
-   
+
    (if (>= (: total) (: topValue))
       (rescale> This) ) 
 )
@@ -234,25 +247,26 @@
 )
 
 (dm computeRange> (Sym)
-   (let (Cnt 0 Low 0 High 0)
-      (if (> Sym (: eofSym))
-         (throw (msg (text "!! Model/computeRange: bad Sym; @1" Sym))) )
-      (mapc '((X)
-         (when (>= Sym Cnt)
-            (inc 'Cnt)
-            (setq Low High)
-            (inc 'High X))) (head (inc Sym) (: counts)))
-      (list Low High) )
+   (if (> Sym (: eofSym))
+      (throw (msg (text "!! Model/computeRange: bad Sym; @1" Sym))) )
+
+   (let
+      (Low (or (caar (nth (: counts) Sym)) 0)
+      High (or (caar (nth (: counts) (inc Sym))) (: total)))
+   
+      (list Low High))
 )
 
 # Encode the given symbol
 (dm emit> (Sym)
    (let ( Range (computeRange> This Sym) )
+      #(msg (text "Model/emit Sym: @1,@2 Total: @3 Range: @4,@5" (char Sym) Sym (: total) (car Range) (cadr Range)))
       (encode> (: coder) (car Range) (cadr Range) (: total)) ) 
 )  
 
 # Encode the eof symbol    
 (dm emitEof> ()
+   #(msg (text "Model/emitEof"))
    (emit> This (: eofSym))
 ) 
 
@@ -260,25 +274,23 @@
 (dm decode> ()
    (let (
       Target (decodeTarget> (: coder) (: total))
-      Counts (: counts)
-      Sym 0
-      Low 0      
-      High 0)
+      Sym NIL Low NIL High NIL R NIL)
 
       (if (> Target (: total))
          (throw (msg (text "!! Model/decode: bad Target; @1" Target))) )
 
-      (while (>= Target High)
-         (inc 'Sym)
-         (setq Low High)
-         (inc 'High (car Counts))
-         (setq Counts (cdr Counts)) )
+      (setq 
+         R (seek '((V) (< Target (caadr V))) (: counts))
+         Low (caar R)
+         High (caadr R)
+         Sym (cadadr R) )
 
-      (dec 'Sym) 
       (if (= Sym (: eofSym))
          (eof> (: coder) T) )
      
+      #(msg (text "Model/decode Sym: @1,@2 Total: @3 Range: @4,@5 Target: @6" (char Sym) Sym (: total) Low High Target))
       (decode> (: coder) Low High (: total))
+
 
       Sym ) 
 )
@@ -348,7 +360,7 @@ NIL
 -> 32
 : (length Msg)
 -> 37
-
+o
 : (pack (mapcar char (ACDC_Decompress (ACDC_Compress Msg))))   
 -> "she sells sea shells by the sea shore"
 
@@ -363,9 +375,9 @@ NIL
 # Compress 64K of random A-Z
 : (prog (setq Msg (make (do (** 2 16) (link (rand (char "A") (char "Z")))))) (length Msg))
 -> 65536
-: (/ (length (ACDC_Compress Msg)) 8)
+: (bench (/ (length (ACDC_Compress Msg)) 8))
 -> 38786
-: (= Msg (ACDC_Decompress (ACDC_Compress Msg)))
+: (bench (= Msg (ACDC_Decompress (ACDC_Compress Msg))))
 -> T
 
 
