@@ -1,7 +1,5 @@
-# -----------------
-(de *ACDC_Debug . NIL)
-
-(setq *ACDC_Buffer NIL)
+# Uses and idx to manage the symbols in the Model
+# -----------------------------------------------
 
 # -----------------
 (class +ACDC_Scale)
@@ -350,7 +348,7 @@ NIL
 : (length Msg)
 -> 37
 
-: (pack (reverse (mapcar char (ACDC_Decompress (ACDC_Compress Msg)))))                                                       
+: (pack (mapcar char (ACDC_Decompress (ACDC_Compress Msg))))
 -> "she sells sea shells by the sea shore"
 
 # Compress 64K of 'A's
@@ -358,7 +356,7 @@ NIL
 -> 65536
 : (/ (length (ACDC_Compress Msg)) 8)
 -> 303
-: (= Msg (reverse (ACDC_Decompress (ACDC_Compress Msg))))
+: (= Msg (ACDC_Decompress (ACDC_Compress Msg)))
 -> T
 
 # Compress 64K of random A-Z
@@ -366,7 +364,7 @@ NIL
 -> 65536
 : (/ (length (ACDC_Compress Msg)) 8)
 -> 38786
-: (= Msg (reverse (ACDC_Decompress (ACDC_Compress Msg))))
+: (= Msg (ACDC_Decompress (ACDC_Compress Msg)))
 -> T
 
 
