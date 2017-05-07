@@ -9,7 +9,7 @@
    # B must of at least one binary order of magnitude
    # than the size of the block being encoded
    # in order to avoid precision errors
-   (default B 24) 
+   (default B 32) 
    (=: bits B)
    (=: top (- (** 2 B) 1))
    (=: qtr1 (+ 1 (/ (: top) 4)))
@@ -212,49 +212,65 @@
       (throw "Arithmetic encoder required"))
    
    (=: coder Coder)                 # encoder|decoder instance
-   (=: max 258)                     # number of symbols (0..255 + 1 eof)
-   (=: eofSym (+ (: max) -2))       # eof symbol
-   (=: eotSym (+ (: max) -1))       # eof symbol
+   (=: max 257)                     # number of symbols (0..255 + 1 eof)
+   (=: eofSym (+ (: max) -1))       # eof symbol
    (=: topValue (; (; (: coder) scale) top))
 
-   # Maintain cumulative frequencies in list
+   # Maintain cumulative frequencies in binary indexed tree (fenwick tree) 
    # Initial probability needs to be non-zero.. start at 1.
-   # ((1 0) (2 1)...(66 65) (67 66)...(256 255) (257 256)..)
-   #                    "A"     "B"        "EOF"
-   (=: counts (make (for X (: max) (link (list X (- X 1))))))
-   (=: total (caar (nth (: counts) (inc (: eotSym)))))    # total probability
+   (prReset> This)  
+   (for N (: max) (prUpdate> This N 1))
    #(show This)
 )
+
+(dm prReset> (N)
+  (=: cumpr (need (: max) 0))
+  (=: bitsMask (- (** 2 32) 1))
+)
+	
+(dm prUpdate> (N X)
+   (loop 
+      (NIL (<= N (: max)))
+      (inc (nth (: cumpr) N) X)
+      (setq N (+ N (& N (+ (x| N (: bitsMask)) 1))))
+   )
+   (: cumpr) )
+	
+(dm prLookup> (N)
+   (let (Res 0)
+      (loop
+         (T (< N 1))
+         (inc 'Res (car (nth (: cumpr) N)))
+         (setq N (& N (- N 1)))
+      )
+      Res))
 
 (dm rescale> ()
    # TODO: Rescale model; not necessary unless
    # very huge message or very low precision
-   #(throw "BasicModel/rescale: Insufficient precision") 
+   (throw "BasicModel/rescale: Insufficient precision") 
    
    # 1/2 all, ensuring no zeros
-   (mapc '((V) (set V (>> 1 (+ (car V) 1)))) (: counts))
+   # (mapc '((V) (set V (>> 1 (+ (car V) 1)))) (: counts))
    # Ugly.. sum the difference of all adjacent codes to get our total
-   (=: total (+ (caar (: counts)) 
-               (sum + (maplist 
-                  '((L) (- (or (caadr L) (caar L)) (caar L))) (: counts)))))
+   # (=: total (+ (caar (: counts)) 
+   #            (sum + (maplist 
+   #               '((L) (- (or (caadr L) (caar L)) (caar L))) (: counts)))))
 
 )
 
 # Update the model for a symbols occurrence  
 (dm update> (Sym)
-   (if (> Sym (: eotSym))
+   (if (> Sym (: eofSym))
       (throw (text "Model/update: bad Sym: @1 >eotSym: @2" Sym (: eotSym))))
-  
+ 
+ 
    # Update the occurrence count for a given symbol and
    # propagate the change in cumulatives through
    # subsequent symbols, in order, as well
-   (let (R (nth (: counts) (inc Sym)))
-      (mapc '((V) (inc V)) R)
-   )
+   (prUpdate> This (+ Sym 1) 1)
 
-   (inc (:: total))
-
-   (if (>= (: total) (: topValue))
+   (if (>= (prLookup> This (: max)) (: topValue))
       (rescale> This) ) 
 )
  
@@ -267,18 +283,19 @@
       (throw (msg (text "!! Model/computeRange: bad Sym; @1" Sym))) )
 
    (let
-      (Low (or (caar (nth (: counts) Sym)) 0)
-      High (or (caar (nth (: counts) (inc Sym))) (: total)))
+      (Low (if (=0 Sym) 0 (prLookup> This Sym))
+      High (prLookup> This (+ Sym 1)) 
+      Total (prLookup> This (: max)))
    
-      (list Low High))
+      (list Low High Total))
 )
 
-# Encode the given symbol
+#L Encode the given symbol
 (dm emit> (Sym)
    (let ( Range (computeRange> This Sym) )
       #(msg (text "Model/emit Sym: @1,@2 Total: @3 Range: @4,@5" 
-      #              (char Sym) Sym (: total) (car Range) (cadr Range)))
-      (encode> (: coder) (car Range) (cadr Range) (: total)) ) 
+      #              (char Sym) Sym (caddr Range) (car Range) (cadr Range)))
+      (encode> (: coder) (car Range) (cadr Range) (caddr Range) ) ) 
 )  
 
 # Encode the eof symbol    
@@ -290,26 +307,25 @@
 # Get the next symbol and decode    
 (dm decode> ()
    (let (
-      Target (decodeTarget> (: coder) (: total))
-      Sym NIL Low NIL High NIL R NIL)
+      Total (prLookup> This (: max))
+      Target (decodeTarget> (: coder) Total)
+      Sym NIL Low 0 High NIL R NIL)
 
-      (if (> Target (: total))
+      (if (> Target Total)
          (throw (msg (text "!! Model/decode: bad Target; @1" Target))) )
 
       # Given the target we determine the range into which itfalls.
-      (setq 
-         R (seek '((V) (< Target (caadr V))) (: counts))
-         Low (caar R)
-         High (caadr R)
-         Sym (cadadr R) )
+      (for N (: max)
+         (setq Sym (- N 1) High (prLookup> This N))
+         (T (< Target High))
+         (setq Low High))
 
       (if (= Sym (: eofSym))
          (eof> (: coder) T) )
      
       #(msg (text "Model/decode Sym: @1,@2 Total: @3 Range: @4,@5 Target: @6" 
-      #              (char Sym) Sym (: total) Low High Target))
-      (decode> (: coder) Low High (: total))
-
+      #              (char Sym) Sym Total Low High Target))
+      (decode> (: coder) Low High Total)
 
       Sym ) 
 )
