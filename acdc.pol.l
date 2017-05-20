@@ -408,20 +408,23 @@
    (=: bitsMask (- (** 2 32) 1))    # Max nodes in tree
    (=: symcnt SymN)
 
+
+   #(msg "#ctor: Initializing model")
    (=: mmodel 
       (make 
          (for N SymN  # Symbols list with sorted list of symbols that follow each symbol. 
             (let (
-               Total 1
+               Total 2 
                FT NIL )
 
                #(if (=0 (% N 500) 0) (msg (pack "#N: " N "; sym: " (car L) " " Syms " " Cnt)))
 
                # Initially, the only symbol in the tree is the esc symbol
-               (idx 'FT (list (: escSym) 1) T)
+               (idx 'FT (list (: escSym) 2) T)
 
                #(msg "#lnk")
-               (link (list N FT Total)) ) ) ) ) 
+               (link (list N FT Total)) 
+            ) ) ) ) 
 
    #(msg "#ctor: Balancing model")
    (let (BT NIL) (balance 'BT (: mmodel)) (=: mmodel BT))
@@ -438,10 +441,6 @@
      (when Elt (inc (cdr Elt) X))
    )
    FT 
-)
-
-(dm prExists> (FT N)
-   (lup FT N)
 )
 
 (dm prLookup> (FT N)
@@ -528,8 +527,8 @@
             # Encode escape symbol
             #(msg "#emit> (new) " CurSym " --> " CurSym "; Max " (: max))
             (setq 
-               Low (prLookup> This (car FT) (- (: escSym) 1))
                High (prLookup> This (car FT) (: escSym))
+               Low (prLookup> This (car FT) (dec (: escSym)))
                Total (prLookup> This (car FT) (: max)) )
             
             #(msg (text "Model/emit (esc) Sym: @1 Total: @2 Range: @3,@4" 1 Total Low High))
@@ -624,6 +623,7 @@
 (de ACDC_MZCompress (Msg SymN)
    # NOTE! There is no eof encoded here. Keep track of length separately
    (setq *ACDC_Count 0)
+   #(msg "##MZCompress: SymN: " SymN)
    (let 
       (Cnt 0
          Sym NIL
@@ -634,12 +634,13 @@
    
       # Hackity hack
       # See (outputBits> ) of '+ACDC_Encoder for 'link that feeds this 'make 
+      #(msg "##MZCompress: START" )
       (setq Buffer
          (make 
             (for Sym Msg
                (inc '*ACDC_Count)
                (if (or (=0 Sym) (not Sym)) (throw "#ACDC_MZCompress: data error; cannot encode 0 or NIL"))
-               #(msg "#MCompress: Cnt " (inc 'Cnt) "; Sym: " Sym)
+               #(msg "#MZCompress: Cnt " (inc 'Cnt) "; Sym: " Sym)
                (emit> Model Sym PrvSym)
                (update> Model Sym PrvSym)
                (setq PrvSym Sym) )
@@ -959,6 +960,300 @@
 
       Msg )
 )
+
+
+# ========================================================================
+# Lazy Adaptive Model
+# Use ESC and total symbol count for
+
+(class +ACDC_NZModel)
+
+(dm T (Coder SymN)
+   (if (not Coder) 
+      (throw "Arithmetic encoder required"))
+  
+   (default SymN '(0 255))
+
+   (=: coder Coder)               # encoder|decoder instance
+   (=: minSym (car SymN))
+   (=: maxSym (cadr SymN))
+   (=: escSym (inc (: maxSym) 2))
+   (=: eofSym (inc (: maxSym) 3))
+   (=: max (: eofSym))
+   (=: topValue (; (; (: coder) scale) top))
+
+   # Maintain cumulative frequencies in binary indexed tree (fenwick tree) 
+   # Initial probability needs to be non-zero.. start at 1.
+   (=: bitsMask (- (** 2 32) 1))    # Max nodes in tree
+
+   (let (MM NIL FT NIL) 
+      (idx 'FT (list (: escSym) 1) T)
+      (idx (:: mmodel) (list (: minSym) FT 1) T) )
+
+   #(show This)
+)
+
+(dm prUpdate> (FT N X)
+   (let (Elt NIL Ndx N)
+     (setq Elt (lup FT Ndx))
+     (when Elt (inc (cdr Elt) X))
+   )
+   FT 
+)
+
+(dm prLookup> (FT N)
+   #(msg (pack "#prLookup> " N))
+   #(msg (idx 'FT))
+   (let (Res 0)
+      (for Elt (idx 'FT) 
+         (T (> (car Elt) N))
+         (inc 'Res (if Elt (cadr Elt) 0) ) 
+      ) Res )
+
+   #(let (Res 0 Elt NIL Ndx (: minSym))
+   #   (loop 
+   #      (NIL (<= Ndx N))
+   #      (setq Elt (lup FT Ndx))
+   #      (when Elt (inc 'Res (cadr Elt)))
+   #      (inc 'Ndx)
+   #   )
+   #   Res
+   #)
+)
+
+(dm rescale> ()
+   # TODO: Rescale model; not necessary unless
+   # very huge message or very low precision
+   (throw "BasicModel/rescale: Insufficient precision") 
+)
+
+(dm addSym> (Sym)
+   (let (FT NIL) 
+      (idx 'FT (list (: escSym) 1) T)
+      (idx (:: mmodel) (list Sym FT 1) T) 
+      Sym   
+   )
+)
+
+# Update the model for a symbols occurrence  
+(dm update> (CurSym PrvSym)
+   #(msg "#update> " CurSym " " PrvSym)
+   
+   # Update the occurrence count for a given symbol and
+   # propagate the change in cumulatives through
+   # subsequent symbols, in order, as well
+
+   (default PrvSym (: minSym))
+   (let (X NIL Y NIL FT NIL Total NIL)
+     
+      (setq X (lup (: mmodel) PrvSym))
+      (when (not X)
+         # Just occurred, add symbol
+         (addSym> This PrvSym)
+         (setq X (lup (: mmodel) PrvSym))
+      )
+      (ifn X (throw (text "#update> ; data error (PrvSym); PrvSym @1" PrvSym)))
+     
+      (setq 
+         FT (nth X 2)
+         Total (nth X 3))
+
+      (setq Y (lup (car FT) CurSym))
+      (ifn Y 
+         (prog
+            # Add a new symbol. Should only happen on decoding
+            (if (> CurSym (: max)) (throw (text "#update> ; data error (out-of-range); New Sym @1" CurSym)))
+            #(msg "#emit> (+new) PrvSym: " PrvSym "; CurSym: " CurSym "; Max: " (: max))
+            (idx FT (list CurSym 0) T)
+            #(msg (idx FT))
+         ) )
+
+      (prUpdate> This (car FT) CurSym 1)
+      (inc Total)
+
+      (if (>= (prLookup> This (car FT) (: max)) (: topValue))
+         (rescale> This) ) ) 
+)
+ 
+# Encode the given symbol
+(dm emit> (CurSym PrvSym)
+   #(msg "#emit> " CurSym " " PrvSym)
+   (default PrvSym (: minSym))
+   (let (High NIL Low NIL Total NIL
+         X NIL Y NIL FT NIL)
+      
+      (setq X (lup (: mmodel) PrvSym))
+      (when (not X)
+         # Just occurred, add symbol
+         (addSym> This PrvSym)
+         (setq X (lup (: mmodel) PrvSym))
+      )
+      (ifn X (throw (text "#emit> ; data error (prvsym); PrvSym @1" PrvSym)))
+
+      # Sym FT Total
+      (setq FT (nth X 2))
+
+      (setq Y (lup (car FT) CurSym))
+      (ifn Y 
+         (prog 
+            # Add a new symbol
+            (if (> CurSym (: max)) (throw (text "#emit> ; data error (out-of-range); New Sym @1" CurSym)))
+
+            # Encode escape symbol
+            #(msg "#emit> (new) " CurSym " --> " CurSym "; Max " (: max))
+            (setq 
+               Low (if (<= (: escSym) (: minSym)) 0 (prLookup> This (car FT) (dec (: escSym))))
+               High (prLookup> This (car FT) (: escSym))
+               Total (prLookup> This (car FT) (: max)) )
+            
+            #(msg (text "Model/emit (esc) Sym: @1/@2 Total: @3 Range: @4,@5" CurSym PrvSym Total Low High))
+            
+            (encode> (: coder) Low High Total)
+            (encode> (: coder) (dec CurSym) CurSym (: max))
+            
+            #(msg "#emit> (+new) CurSym/PrvSym: " CurSym "/" PrvSym "; Max: " (: max))
+            (idx FT (list CurSym 0) T)
+
+            #(msg (idx FT))
+        )
+        (prog 
+            #(msg (idx FT))
+            
+            #(msg "#emit> " CurSym)
+            (setq 
+               Low (if (<= CurSym (: minSym)) 0 (prLookup> This (car FT) (dec CurSym)))
+               High (prLookup> This (car FT) CurSym)
+               Total (prLookup> This (car FT) (: max)) )
+
+            #(msg (text "Model/emit Sym: @1/@2 Total: @3 Range: @4,@5" 
+            #           CurSym PrvSym Total Low High))
+
+            (encode> (: coder) Low High Total) 
+        ) ) )
+)  
+
+
+# Get the next symbol and decode    
+(dm decode> (PrvSym)
+   (default PrvSym (: minSym))
+   #(msg "#PrvSym> " PrvSym)
+   (let (High NIL Low NIL Total NIL
+         X NIL FT NIL Sym NIL Target)
+      
+      (setq X (lup (: mmodel) PrvSym))
+      (when (not X)
+         # Just occurred, add symbol
+         (addSym> This PrvSym)
+         (setq X (lup (: mmodel) PrvSym))
+      )
+      (ifn X (throw (text "#decode> ; data error (prvsym); PrvSym @1" PrvSym)))
+
+      # Sym FT Total
+      (setq 
+         FT (nth X 2)
+         Total (car (nth X 3)) #(prLookup> This (car FT) (: max)) 
+         Target (decodeTarget> (: coder) Total ) )
+
+      (if (> Target Total)
+         (throw (msg (text "#decoder> data error (model/decode): bad Target; @1" Target))) )
+
+      # Given the target we determine the range into which it falls.
+      (setq Low 0 High 0)
+      (for Elt (idx FT)
+         (setq 
+            Sym (car Elt) 
+            High (+ High (cadr Elt)) )
+         (T (< Target High))
+         (setq Low High) )
+
+      # Update the decoder
+      #(msg "#decode> Sym: " Sym "; Low: " Low "; High: " High "; Total: " Total)
+      (decode> (: coder) Low High Total)
+
+      # If 'escape' symbol...
+      (if (= Sym (: escSym))
+         (prog
+            (setq Target (decodeTarget> (: coder) (: max)))  
+            (if (> Target (: max))
+               (throw (msg (text "#decoder> data error (model/decode): (esc) bad Target; @1" Target))) )
+
+            (setq 
+               Low Target  
+               High (inc Target) 
+               Total (: max) )
+
+            (decode> (: coder) Low High Total) 
+         
+            (setq Sym (inc Target))
+            #(msg "#decode> (esc sym) Sym: " Sym "; Low: " Low "; High: " High "; Total: " Total)
+            #(msg (idx FT))
+         ) )
+
+      #(msg (text "Model/decode PrvSym: @1 Sym: @2 Total: @3 Range: @4,@5 Target: @6" 
+      #              PrvSym Sym Total Low High Target))
+
+      Sym )
+)
+
+# ---------------------------------------------------------
+# Arithmetic Coding Compress
+
+(de ACDC_NZCompress (Msg SymN)
+   # NOTE! There is no eof encoded here. Keep track of length separately
+   (setq *ACDC_Count 0)
+   #(msg "##NZCompress: SymN: " SymN)
+   (let 
+      (Cnt 0
+         Sym NIL
+         PrvSym NIL
+         Buffer NIL
+         Encoder (new '(+ACDC_Encoder))
+         Model (new '(+ACDC_NZModel) Encoder SymN) )
+   
+      # Hackity hack
+      # See (outputBits> ) of '+ACDC_Encoder for 'link that feeds this 'make 
+      #(msg "##NZCompress: START" )
+      (setq Buffer
+         (make 
+            (for Sym Msg
+               (inc '*ACDC_Count)
+               #(msg "#NZCompress: Cnt " (inc 'Cnt) "; Sym: " Sym)
+               (emit> Model Sym PrvSym)
+               (update> Model Sym PrvSym)
+               (setq PrvSym Sym) )
+            (finalize> Encoder) ) )
+
+      Buffer )
+)
+
+
+# ---------------------------------------------------------
+# Arithmetic Coding Decompress
+   
+(de ACDC_NZDecompress (Buffer SymN MsgLen)
+   (setq *ACDC_Count 0)
+   (let (
+      Decoder (new '(+ACDC_Decoder) Buffer)
+      Model (new '(+ACDC_NZModel) Decoder SymN) 
+      Msg NIL 
+      Sym NIL
+      PrvSym NIL 
+      Cnt 0)
+
+      (setq Msg
+         (make
+            (startDecode> Decoder)
+            (for N MsgLen
+               (setq Sym (decode> Model PrvSym))
+               #(msg "#NZDecompress: Cnt " (inc 'Cnt) "; Sym: " Sym)
+               (update> Model Sym PrvSym)
+               (link Sym)
+               (inc '*ACDC_Count)
+               (setq PrvSym Sym) ) ) )
+
+      Msg )
+)
+
 
 
 # ---------------------------------------------------------
