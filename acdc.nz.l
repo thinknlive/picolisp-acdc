@@ -197,7 +197,6 @@
 
 ) )   
 
-
 # ========================================================================
 # Lazy Adaptive Model
 # Use ESC and total symbol count for
@@ -211,10 +210,10 @@
    (default SymN '(0 255))
 
    (=: coder Coder)               # encoder|decoder instance
-   (=: minSym (inc (car SymN)))
-   (=: maxSym (inc (cadr SymN)))  # +1 so minSym > 0
-   (=: escSym (inc (: maxSym) 1))
-   (=: eofSym (inc (: maxSym) 2))
+   (=: minSym (car SymN))
+   (=: maxSym (cadr SymN))
+   (=: escSym (inc (: maxSym) 2))
+   (=: eofSym (inc (: maxSym) 3))
    (=: max (: eofSym))
    (=: topValue (; (; (: coder) scale) top))
 
@@ -224,14 +223,9 @@
 
    (let (MM NIL FT NIL) 
       (idx 'FT (list (: escSym) 1) T)
-      (idx 'FT (list (: eofSym) 1) T)
-      (idx (:: mmodel) (list (: minSym) FT 2 NIL) T) )
+      (idx (:: mmodel) (list (: minSym) FT 1) T) )
 
    #(show This)
-)
-
-(dm finalize> ()
-   (setq *ACDC_NZModel (list (: minSym) (: maxSym) (: mmodel)))
 )
 
 (dm prUpdate> (FT N X)
@@ -243,11 +237,23 @@
 )
 
 (dm prLookup> (FT N)
+   #(msg (pack "#prLookup> " N))
+   #(msg (idx 'FT))
    (let (Res 0)
       (for Elt (idx 'FT) 
          (T (> (car Elt) N))
          (inc 'Res (if Elt (cadr Elt) 0) ) 
       ) Res )
+
+   #(let (Res 0 Elt NIL Ndx (: minSym))
+   #   (loop 
+   #      (NIL (<= Ndx N))
+   #      (setq Elt (lup FT Ndx))
+   #      (when Elt (inc 'Res (cadr Elt)))
+   #      (inc 'Ndx)
+   #   )
+   #   Res
+   #)
 )
 
 (dm rescale> ()
@@ -259,8 +265,7 @@
 (dm addSym> (Sym)
    (let (FT NIL) 
       (idx 'FT (list (: escSym) 1) T)
-      (idx 'FT (list (: eofSym) 1) T)
-      (idx (:: mmodel) (list Sym FT 2 NIL) T) 
+      (idx (:: mmodel) (list Sym FT 1) T) 
       Sym   
    )
 )
@@ -274,7 +279,7 @@
    # subsequent symbols, in order, as well
 
    (default PrvSym (: minSym))
-   (let (X NIL Y NIL FT NIL Total NIL Max NIL)
+   (let (X NIL Y NIL FT NIL Total NIL)
      
       (setq X (lup (: mmodel) PrvSym))
       (when (not X)
@@ -286,8 +291,7 @@
      
       (setq 
          FT (nth X 2)
-         Total (nth X 3)
-         Max (nth X 4) )
+         Total (nth X 3))
 
       (setq Y (lup (car FT) CurSym))
       (ifn Y 
@@ -295,7 +299,6 @@
             # Add a new symbol. Should only happen on decoding
             (if (> CurSym (: max)) (throw (text "#update> ; data error (out-of-range); New Sym @1" CurSym)))
             #(msg "#emit> (+new) PrvSym: " PrvSym "; CurSym: " CurSym "; Max: " (: max))
-            (if (> CurSym (car Max)) (set Max CurSym))
             (idx FT (list CurSym 0) T)
             #(msg (idx FT))
          ) )
@@ -439,7 +442,6 @@
          Sym NIL
          PrvSym NIL
          Buffer NIL
-         Code NIL
          Encoder (new '(+ACDC_Encoder))
          Model (new '(+ACDC_NZModel) Encoder SymN) )
    
@@ -448,15 +450,14 @@
       #(msg "##NZCompress: START" )
       (setq Buffer
          (make 
-            (for Code Msg
+            (for Sym Msg
                (inc '*ACDC_Count)
-               (setq Sym (inc Code))
-               #(msg (pack "#NZCompress: Cnt " (inc 'Cnt) "; Code: " Code "; Sym: " Sym))
+               #(msg "#NZCompress: Cnt " (inc 'Cnt) "; Sym: " Sym)
                (emit> Model Sym PrvSym)
                (update> Model Sym PrvSym)
                (setq PrvSym Sym) )
-            (finalize> Encoder) )  )
-      (finalize> Model)
+            (finalize> Encoder) ) )
+
       Buffer )
 )
 
@@ -471,7 +472,6 @@
       Model (new '(+ACDC_NZModel) Decoder SymN) 
       Msg NIL 
       Sym NIL
-      Code NIL
       PrvSym NIL 
       Cnt 0)
 
@@ -480,16 +480,14 @@
             (startDecode> Decoder)
             (for N MsgLen
                (setq Sym (decode> Model PrvSym))
-               (setq Code (dec Sym))
                #(msg "#NZDecompress: Cnt " (inc 'Cnt) "; Sym: " Sym)
                (update> Model Sym PrvSym)
-               (link Code)
+               (link Sym)
                (inc '*ACDC_Count)
                (setq PrvSym Sym) ) ) )
 
       Msg )
 )
-
 
 
 # ---------------------------------------------------------
