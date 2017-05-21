@@ -1,3 +1,19 @@
+# Fibonnacci numbers (Algorithmics: Theory and Practice)
+(de fibN (N)
+   (let (I 1  J 0  K 0  H 1  Tmp NIL)
+      (while (gt0 N)
+         (when (=1 (& N 1))
+            (setq
+               Tmp (* J H)
+               J (+ (* I H) (* J K) Tmp)
+               I (+ (* I K) Tmp) ) )
+         (setq
+            Tmp (* H H)
+            H (+ (* 2 K H) Tmp)
+            K (+ (* K K) Tmp)
+            N (/ N 2) ) )
+      J ) )
+
 # Fibonacci codes (recursive loop solution)
 (de fibn2 (N)
    (let
@@ -87,4 +103,18 @@
          (dec 'P) )
       (cddr Fn) ) )
                 
-
+(de fibEncodeN (N)
+   (let (P 0 Fn '() Fp 0)
+      (while (<= (fibN P) N) 
+         (inc 'P) )
+      (dec 'P)
+      (while (>= P 0)
+         (setq 
+            Fn (cons 0 Fn)
+            Fp (fibN P) )
+         (when (<= Fp N)
+            (set Fn P) #(set Fn Fp)
+            (setq N (- N Fp)) ) 
+         (dec 'P) )
+      (uniq (sort Fn)) ) )
+ 

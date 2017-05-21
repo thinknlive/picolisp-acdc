@@ -344,7 +344,7 @@
             #(msg (text "Model/emit (esc) Sym: @1/@2 Total: @3 Range: @4,@5" CurSym PrvSym Total Low High))
             
             (encode> (: coder) Low High Total)
-            (encode> (: coder) (dec CurSym) CurSym (: max))
+            (encode> (: coder) CurSym (inc CurSym) (: max))
             
             #(msg "#emit> (+new) CurSym/PrvSym: " CurSym "/" PrvSym "; Max: " (: max))
             (idx FT (list CurSym 0) T)
@@ -419,7 +419,7 @@
 
             (decode> (: coder) Low High Total) 
          
-            (setq Sym (inc Target))
+            (setq Sym Target)
             #(msg "#decode> (esc sym) Sym: " Sym "; Low: " Low "; High: " High "; Total: " Total)
             #(msg (idx FT))
          ) )
