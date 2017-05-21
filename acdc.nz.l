@@ -217,13 +217,14 @@
    (=: max (: eofSym))
    (=: topValue (; (; (: coder) scale) top))
 
-   # Maintain cumulative frequencies in binary indexed tree (fenwick tree) 
-   # Initial probability needs to be non-zero.. start at 1.
+   # Maintain cumulative frequencies in sparse binary trees
    (=: bitsMask (- (** 2 32) 1))    # Max nodes in tree
 
-   (let (MM NIL FT NIL) 
+   (let (MM NIL FT NIL Total NIL) 
       (idx 'FT (list (: escSym) 1) T)
-      (idx (:: mmodel) (list (: minSym) FT 1) T) )
+      (idx 'FT (list (: eofSym) 1) T)
+      (setq Total (prLookup> This (: max)))
+      (idx (:: mmodel) (list (: minSym) FT Total) T) )
 
    #(show This)
 )
@@ -237,23 +238,11 @@
 )
 
 (dm prLookup> (FT N)
-   #(msg (pack "#prLookup> " N))
-   #(msg (idx 'FT))
    (let (Res 0)
       (for Elt (idx 'FT) 
          (T (> (car Elt) N))
          (inc 'Res (if Elt (cadr Elt) 0) ) 
       ) Res )
-
-   #(let (Res 0 Elt NIL Ndx (: minSym))
-   #   (loop 
-   #      (NIL (<= Ndx N))
-   #      (setq Elt (lup FT Ndx))
-   #      (when Elt (inc 'Res (cadr Elt)))
-   #      (inc 'Ndx)
-   #   )
-   #   Res
-   #)
 )
 
 (dm rescale> ()
@@ -263,9 +252,13 @@
 )
 
 (dm addSym> (Sym)
-   (let (FT NIL) 
+   (let (FT NIL Total NIL) 
       (idx 'FT (list (: escSym) 1) T)
-      (idx (:: mmodel) (list Sym FT 1) T) 
+      (idx 'FT (list (: eofSym) 1) T)
+      (setq Total (prLookup> This (: max)))
+      (idx (:: mmodel) (list Sym FT Total) T) 
+      #(msg "#addSym> " Sym)
+      #(msg (idx (:: mmodel)))
       Sym   
    )
 )
@@ -386,7 +379,7 @@
       # Sym FT Total
       (setq 
          FT (nth X 2)
-         Total (car (nth X 3)) #(prLookup> This (car FT) (: max)) 
+         Total (prLookup> This (car FT) (: max)) 
          Target (decodeTarget> (: coder) Total ) )
 
       (if (> Target Total)
