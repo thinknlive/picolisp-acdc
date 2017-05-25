@@ -7,7 +7,7 @@
    # B must of at least one binary order of magnitude
    # than the size of the block being encoded
    # in order to avoid precision errors
-   (default B 40) 
+   (default B 32) 
    (=: bits B)
    (=: top (- (** 2 B) 1))
    (=: qtr1 (+ 1 (/ (: top) 4)))
@@ -212,8 +212,8 @@
    (=: coder Coder)               # encoder|decoder instance
    (=: minSym (car SymN))
    (=: maxSym (cadr SymN))
-   (=: escSym (inc (: maxSym) 2))
-   (=: eofSym (inc (: maxSym) 3))
+   (=: escSym (+ (: maxSym) 1))
+   (=: eofSym (+ (: maxSym) 2))
    (=: max (: eofSym))
    (=: topValue (; (; (: coder) scale) top))
 
@@ -229,6 +229,7 @@
    #(show This)
 )
 
+# --------------------
 (dm prUpdate> (FT N X)
    (let (Elt NIL Ndx N)
      (setq Elt (lup FT Ndx))
@@ -237,6 +238,7 @@
    FT 
 )
 
+# ------------------
 (dm prLookup> (FT N)
    (let (Res 0)
       (for Elt (idx 'FT) 
@@ -245,12 +247,14 @@
       ) Res )
 )
 
+# -------------
 (dm rescale> ()
    # TODO: Rescale model; not necessary unless
    # very huge message or very low precision
    (throw "BasicModel/rescale: Insufficient precision") 
 )
 
+# ---------------
 (dm addSym> (Sym)
    (let (FT NIL Total NIL) 
       (idx 'FT (list (: escSym) 1) T)
@@ -263,7 +267,7 @@
    )
 )
 
-# Update the model for a symbols occurrence  
+# ------------------------
 (dm update> (CurSym PrvSym)
    #(msg "#update> " CurSym " " PrvSym)
    
@@ -302,8 +306,8 @@
       (if (>= (prLookup> This (car FT) (: max)) (: topValue))
          (rescale> This) ) ) 
 )
- 
-# Encode the given symbol
+
+# -----------------------
 (dm emit> (CurSym PrvSym)
    #(msg "#emit> " CurSym " " PrvSym)
    (default PrvSym (: minSym))
@@ -338,7 +342,7 @@
             
             (encode> (: coder) Low High Total)
             (encode> (: coder) CurSym (inc CurSym) (: max))
-            
+           
             #(msg "#emit> (+new) CurSym/PrvSym: " CurSym "/" PrvSym "; Max: " (: max))
             (idx FT (list CurSym 0) T)
 
@@ -360,8 +364,7 @@
         ) ) )
 )  
 
-
-# Get the next symbol and decode    
+# ------------------
 (dm decode> (PrvSym)
    (default PrvSym (: minSym))
    #(msg "#PrvSym> " PrvSym)
@@ -423,9 +426,7 @@
       Sym )
 )
 
-# ---------------------------------------------------------
-# Arithmetic Coding Compress
-
+# ----------------------------
 (de ACDC_NZCompress (Msg SymN)
    # NOTE! There is no eof encoded here. Keep track of length separately
    (setq *ACDC_Count 0)
@@ -445,6 +446,7 @@
          (make 
             (for Sym Msg
                (inc '*ACDC_Count)
+               (if (not Sym) (throw "#NZCompress: Cannot encode NIL at Pos " Cnt))
                #(msg "#NZCompress: Cnt " (inc 'Cnt) "; Sym: " Sym)
                (emit> Model Sym PrvSym)
                (update> Model Sym PrvSym)
@@ -455,9 +457,7 @@
 )
 
 
-# ---------------------------------------------------------
-# Arithmetic Coding Decompress
-   
+# ----------------------------------------
 (de ACDC_NZDecompress (Buffer SymN MsgLen)
    (setq *ACDC_Count 0)
    (let (
