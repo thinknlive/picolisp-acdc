@@ -26,13 +26,14 @@
    (=: high (; (: scale) top))
    (=: top (: high))
    (=: followBits 0)
-   (=: buffer NIL)
+   #(=: buffer 1)
    (=: cnt 0)
 )
-            
+
 (dm outputBit> (Bit)
-   # (=: buffer (cons Bit (: buffer)))
+   #(=: buffer (cons Bit (: buffer)))
    (link Bit)
+   
    (while (gt0 (: followBits))
       # (=: buffer (cons (x| 1 Bit) (: buffer)))
       (link (x| 1 Bit))
@@ -451,7 +452,8 @@
                (emit> Model Sym PrvSym)
                (update> Model Sym PrvSym)
                (setq PrvSym Sym) )
-            (finalize> Encoder) ) )
+           (finalize> Encoder) 
+      ) )
 
       Buffer )
 )
